@@ -1,0 +1,57 @@
+version: "3.9"
+
+# ============================================================
+# Docker Compose — запускает PostgreSQL + Backend вместе
+#
+# Как использовать:
+#   docker-compose up -d          — запустить в фоне
+#   docker-compose down           — остановить
+#   docker-compose logs -f backend — смотреть логи
+# ============================================================
+
+services:
+
+  # ── PostgreSQL ────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: toyshop_db
+    restart: always
+    environment:
+      POSTGRES_DB:       toyshop_db
+      POSTGRES_USER:     toyshop_user
+      POSTGRES_PASSWORD: toyshop_pass
+    ports:
+      - "5432:5432"          # Порт БД доступен с хоста
+    volumes:
+      - postgres_data:/var/lib/postgresql/data   # Данные сохраняются между перезапусками
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U toyshop_user -d toyshop_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ───────────────────────────────────────
+  backend:
+    build: .
+    container_name: toyshop_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://toyshop_user:toyshop_pass@db:5432/toyshop_db
+      SECRET_KEY:   super-secret-key-change-in-production-min-32-chars
+      DEBUG:        "False"
+    volumes:
+      - ./uploads:/app/uploads    # Загруженные изображения
+    depends_on:
+      db:
+        condition: service_healthy   # Ждём пока БД будет готова
+    command: >
+      sh -c "
+        alembic upgrade head &&
+        python seed_data.py &&
+        uvicorn app.main:app --host 0.0.0.0 --port 8000
+      "
+
+volumes:
+  postgres_data:
